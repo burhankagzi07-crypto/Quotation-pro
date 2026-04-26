@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login | Plumber Quotation System</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <div class="brand">
+      <div class="logo">P</div>
+      <div>
+        <h1>Plumber</h1>
+        <p>Quotation Builder Login</p>
+      </div>
+    </div>
+
+    <form id="loginForm">
+      <label for="email">Email Address</label>
+      <input id="email" type="email" placeholder="Enter email" autocomplete="email" required />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" placeholder="Enter password" autocomplete="current-password" required />
+
+      <button id="loginBtn" type="submit">Login</button>
+      <p id="message" class="message"></p>
+    </form>
+
+    <p class="muted" style="margin-top:18px;text-align:center;">Default: admin@gmail.com / user@gmail.com · Password: 123456</p>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script>
+    const form = document.getElementById('loginForm');
+    const btn = document.getElementById('loginBtn');
+
+    function extractToken(data) {
+      return data.token || data.accessToken || data.data?.token;
+    }
+
+    function extractRole(data) {
+      return (data.role || data.user?.role || data.data?.role || data.data?.user?.role || 'user').toLowerCase();
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+
+      if (!email || !password) {
+        showMessage('message', 'Please enter email and password.', 'error');
+        return;
+      }
+
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Logging in...';
+        showMessage('message', '');
+
+        localStorage.clear();
+
+        const res = await fetch(`${API}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          showMessage('message', data.message || data.error || 'Login failed.', 'error');
+          return;
+        }
+
+        const token = extractToken(data);
+        const role = extractRole(data);
+
+        if (!token) {
+          showMessage('message', 'Login response missing token.', 'error');
+          return;
+        }
+
+        localStorage.setItem('token', token);
+        localStorage.setItem('role', role);
+        localStorage.setItem('user', JSON.stringify(data.user || {}));
+
+        showMessage('message', 'Login successful. Redirecting...', 'success');
+
+        window.location.replace(role === 'admin' ? 'admin.html' : 'user.html');
+      } catch (error) {
+        showMessage('message', 'Server error. Please check backend and MongoDB.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Login';
+      }
+    });
+  </script>
+</body>
+</html>

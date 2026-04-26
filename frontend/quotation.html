@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Build Quotation | Plumber</title>
+  <link rel="stylesheet" href="css/app.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <h2>Quotation Builder</h2>
+        <p>Search product codes, select items, edit quantity/MRP/discount and export a professional quotation.</p>
+      </div>
+      <button class="btn-green" onclick="downloadPDF()">Download PDF</button>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><span>Available Products</span><strong id="productCount">0</strong></div>
+      <div class="stat"><span>Selected Items</span><strong id="selectedCount">0</strong></div>
+      <div class="stat"><span>Total Discount</span><strong id="discountTotal">₹0</strong></div>
+      <div class="stat"><span>Grand Total</span><strong id="grandTotal">₹0</strong></div>
+    </section>
+
+    <section class="grid grid-2">
+      <div class="card">
+        <h3>Search Products</h3>
+        <label for="customerName">Customer Name</label>
+        <input id="customerName" placeholder="Enter customer name" />
+
+        <label for="codeSearch">Product Code / Group</label>
+        <div class="search-row">
+          <input id="codeSearch" placeholder="Type MUN, AGN, MUN-001..." />
+          <button onclick="searchProducts()">Search</button>
+        </div>
+        <p id="searchMessage" class="message"></p>
+        <div id="productResults"></div>
+
+        <div class="key-help">
+          <strong>Key Press Events:</strong><br />
+          Ctrl + K = Focus search<br />
+          Enter in search = Add first matched product<br />
+          Ctrl + S = Save quotation<br />
+          Ctrl + P = Download PDF<br />
+          Esc = Clear search
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Quotation / Invoice Table</h3>
+        <div class="table-wrap">
+          <table class="quote-table">
+            <thead>
+              <tr>
+                <th>Image + Code</th>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>MRP</th>
+                <th>Discount %</th>
+                <th>Net Price</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="quotationBody"></tbody>
+          </table>
+        </div>
+
+        <div class="total-box">
+          Subtotal: <span id="subTotal">₹0</span><br />
+          Grand Total: <span id="grandTotalBottom">₹0</span>
+        </div>
+
+        <button class="btn-green" onclick="downloadPDF()">Download PDF</button>
+        <button onclick="createQuotation()">Save Quotation</button>
+        <button class="btn-light" onclick="clearQuotation()">Clear</button>
+        <p id="quotationMessage" class="message"></p>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script>
+    let productList = [];
+    let filteredProducts = [];
+    let selectedItems = [];
+
+    if (requireAuth(['admin', 'user'])) {
+      renderNavbar('Automated quotation builder');
+      setupKeys();
+      loadProducts();
+      renderQuotationTable();
+    }
+
+    async function loadProducts() {
+      try {
+        productList = await apiRequest(`${API}/products`, { headers: authHeaders() }) || [];
+        filteredProducts = productList;
+        setText('productCount', productList.length);
+        renderProductResults();
+      } catch (error) {
+        showMessage('searchMessage', error.message, 'error');
+      }
+    }
+
+    function searchProducts() {
+      const query = document.getElementById('codeSearch').value.trim().toUpperCase();
+      filteredProducts = !query
+        ? productList
+        : productList.filter((product) =>
+            String(product.code).toUpperCase().includes(query) ||
+            String(product.groupCode).toUpperCase().includes(query) ||
+            String(product.name).toUpperCase().includes(query) ||
+            String(product.description).toUpperCase().includes(query)
+          );
+
+      renderProductResults();
+      showMessage('searchMessage', query ? `${filteredProducts.length} products found.` : '');
+    }
+
+    function renderProductResults() {
+      const box = document.getElementById('productResults');
+
+      if (!filteredProducts.length) {
+        box.innerHTML = '<div class="quote-card muted">No products found.</div>';
+        return;
+      }
+
+      box.innerHTML = filteredProducts.map((product) => `
+        <div class="product-card">
+          <img class="product-img" src="${product.image || FALLBACK_IMAGE}" onerror="this.src='${FALLBACK_IMAGE}'" alt="${product.code}" />
+          <div>
+            <div class="code">${product.code}</div>
+            <strong>${product.name}</strong>
+            <p class="muted">${product.description}</p>
+            <p><strong>MRP:</strong> ${money(product.mrp)}</p>
+            <button class="btn-small" onclick="addToQuotation('${product._id}')">Add to Quotation</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function addToQuotation(productId) {
+      const product = productList.find((item) => item._id === productId);
+      if (!product) return;
+
+      const existing = selectedItems.find((item) => item.productId === productId);
+
+      if (existing) {
+        existing.quantity += 1;
+      } else {
+        selectedItems.push({
+          productId: product._id,
+          code: product.code,
+          image: product.image,
+          description: product.description,
+          quantity: 1,
+          mrp: Number(product.mrp || product.price || 0),
+          discount: 0,
+          netPrice: Number(product.mrp || product.price || 0)
+        });
+      }
+
+      showMessage('quotationMessage', `${product.code} added to quotation.`);
+      renderQuotationTable();
+    }
+
+    function calculateItem(index) {
+      const item = selectedItems[index];
+      if (!item) return;
+
+      const quantity = Math.max(Number(item.quantity || 1), 1);
+      const mrp = Math.max(Number(item.mrp || 0), 0);
+      const discount = Math.min(Math.max(Number(item.discount || 0), 0), 100);
+
+      item.quantity = quantity;
+      item.mrp = mrp;
+      item.discount = discount;
+      item.netPrice = Number((quantity * mrp * (1 - discount / 100)).toFixed(2));
+    }
+
+    function updateItem(index, field, value) {
+      if (!selectedItems[index]) return;
+      selectedItems[index][field] = Number(value);
+      calculateItem(index);
+      renderQuotationTable();
+    }
+
+    function removeItem(index) {
+      selectedItems.splice(index, 1);
+      renderQuotationTable();
+    }
+
+    function clearQuotation() {
+      selectedItems = [];
+      renderQuotationTable();
+      showMessage('quotationMessage', 'Quotation cleared.');
+    }
+
+    function calculateTotals() {
+      let subtotal = 0;
+      let discountAmount = 0;
+      let grandTotal = 0;
+
+      selectedItems.forEach((item) => {
+        const gross = Number(item.quantity) * Number(item.mrp);
+        const discount = gross * (Number(item.discount) / 100);
+        subtotal += gross;
+        discountAmount += discount;
+        grandTotal += Number(item.netPrice || 0);
+      });
+
+      setText('selectedCount', selectedItems.length);
+      setText('subTotal', money(subtotal));
+      setText('discountTotal', money(discountAmount));
+      setText('grandTotal', money(grandTotal));
+      setText('grandTotalBottom', money(grandTotal));
+
+      return { subtotal, discountAmount, grandTotal };
+    }
+
+    function renderQuotationTable() {
+      const tbody = document.getElementById('quotationBody');
+
+      if (!selectedItems.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;border-radius:15px;color:#64748b;">No products selected yet.</td></tr>';
+        calculateTotals();
+        return;
+      }
+
+      selectedItems.forEach((_, index) => calculateItem(index));
+
+      tbody.innerHTML = selectedItems.map((item, index) => `
+        <tr>
+          <td>
+            <img class="quote-img" src="${item.image || FALLBACK_IMAGE}" onerror="this.src='${FALLBACK_IMAGE}'" alt="${item.code}" />
+            <strong>${item.code}</strong>
+          </td>
+          <td>${item.description}</td>
+          <td><input class="small-input" type="number" min="1" value="${item.quantity}" oninput="updateItem(${index}, 'quantity', this.value)" /></td>
+          <td><input class="small-input" type="number" min="0" value="${item.mrp}" oninput="updateItem(${index}, 'mrp', this.value)" /></td>
+          <td><input class="small-input" type="number" min="0" max="100" value="${item.discount}" oninput="updateItem(${index}, 'discount', this.value)" /></td>
+          <td class="net">${money(item.netPrice)}</td>
+          <td><button class="btn-red btn-small" onclick="removeItem(${index})">Remove</button></td>
+        </tr>
+      `).join('');
+
+      calculateTotals();
+    }
+
+    async function createQuotation() {
+      if (!selectedItems.length) {
+        showMessage('quotationMessage', 'Add at least one product first.', 'error');
+        return;
+      }
+
+      const customerName = document.getElementById('customerName').value.trim() || 'N/A';
+      const totals = calculateTotals();
+
+      try {
+        const data = await apiRequest(`${API}/quotations`, {
+          method: 'POST',
+          headers: authHeaders(true),
+          body: JSON.stringify({
+            customerName,
+            products: selectedItems,
+            subtotal: totals.subtotal,
+            discountAmount: totals.discountAmount,
+            totalAmount: totals.grandTotal
+          })
+        });
+
+        showMessage('quotationMessage', `${data.quotation?.quotationId || 'Quotation'} saved successfully.`);
+      } catch (error) {
+        showMessage('quotationMessage', error.message, 'error');
+      }
+    }
+
+    function downloadPDF() {
+      if (!selectedItems.length) {
+        showMessage('quotationMessage', 'Add at least one product before downloading PDF.', 'error');
+        return;
+      }
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const customerName = document.getElementById('customerName').value.trim() || 'N/A';
+      const totals = calculateTotals();
+      const quotationNo = `PLB-${Date.now().toString().slice(-6)}`;
+
+      let y = 14;
+      doc.setFontSize(22);
+      doc.text('PLUMBER', 14, y);
+      doc.setFontSize(10);
+      doc.text('Manufacturing Company', 14, y + 6);
+
+      doc.setFontSize(18);
+      doc.text('Quotation / Invoice', 132, y);
+
+      y += 18;
+      doc.setFontSize(10);
+      doc.text(`Quotation No: ${quotationNo}`, 14, y);
+      doc.text(`Date: ${new Date().toLocaleDateString()}`, 145, y);
+      y += 7;
+      doc.text(`Customer: ${customerName}`, 14, y);
+
+      y += 11;
+      doc.setFillColor(241, 245, 249);
+      doc.rect(10, y - 5, 190, 8, 'F');
+      doc.text('Code', 12, y);
+      doc.text('Description', 42, y);
+      doc.text('Qty', 106, y);
+      doc.text('MRP', 124, y);
+      doc.text('Disc%', 148, y);
+      doc.text('Net Price', 169, y);
+      y += 8;
+
+      selectedItems.forEach((item) => {
+        if (y > 260) {
+          doc.addPage();
+          y = 18;
+        }
+        doc.rect(10, y - 5, 190, 18);
+        doc.text(String(item.code).slice(0, 16), 12, y + 3);
+        doc.text(String(item.description).slice(0, 38), 42, y + 3);
+        doc.text(String(item.quantity), 107, y + 3);
+        doc.text(`Rs. ${Number(item.mrp).toFixed(2)}`, 122, y + 3);
+        doc.text(`${item.discount}%`, 150, y + 3);
+        doc.text(`Rs. ${Number(item.netPrice).toFixed(2)}`, 168, y + 3);
+        y += 20;
+      });
+
+      y += 6;
+      doc.setFontSize(11);
+      doc.text(`Subtotal: Rs. ${totals.subtotal.toFixed(2)}`, 135, y);
+      y += 7;
+      doc.text(`Discount: Rs. ${totals.discountAmount.toFixed(2)}`, 135, y);
+      y += 7;
+      doc.setFontSize(13);
+      doc.text(`Grand Total: Rs. ${totals.grandTotal.toFixed(2)}`, 135, y);
+      y += 14;
+      doc.setFontSize(9);
+      doc.text('This is a computer generated quotation.', 14, y);
+
+      doc.save(`${quotationNo}.pdf`);
+    }
+
+    function setupKeys() {
+      document.addEventListener('keydown', (event) => {
+        if (event.ctrlKey && event.key.toLowerCase() === 'k') {
+          event.preventDefault();
+          document.getElementById('codeSearch').focus();
+        }
+        if (event.ctrlKey && event.key.toLowerCase() === 's') {
+          event.preventDefault();
+          createQuotation();
+        }
+        if (event.ctrlKey && event.key.toLowerCase() === 'p') {
+          event.preventDefault();
+          downloadPDF();
+        }
+        if (event.key === 'Escape') {
+          document.getElementById('codeSearch').value = '';
+          searchProducts();
+        }
+      });
+
+      document.getElementById('codeSearch').addEventListener('keyup', (event) => {
+        searchProducts();
+        if (event.key === 'Enter' && filteredProducts.length) {
+          addToQuotation(filteredProducts[0]._id);
+        }
+      });
+    }
+  </script>
+</body>
+</html>
