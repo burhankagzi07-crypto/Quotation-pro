@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Products | Plumber</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <h2>Product Catalogue</h2>
+        <p>Add, search and manage Plumber products with direct image upload.</p>
+      </div>
+      <button onclick="document.getElementById('code').focus()">Add Product</button>
+    </section>
+
+    <section class="grid grid-2">
+      <div class="card">
+        <h3>Add Product</h3>
+        <form id="productForm">
+          <div class="form-grid">
+            <div>
+              <label for="code">Product Code</label>
+              <input id="code" name="code" placeholder="MUN-001" required />
+            </div>
+            <div>
+              <label for="groupCode">Group Code</label>
+              <input id="groupCode" name="groupCode" placeholder="MUN" />
+            </div>
+          </div>
+
+          <label for="name">Product Name</label>
+          <input id="name" name="name" placeholder="Product name" required />
+
+          <label for="description">Description</label>
+          <textarea id="description" name="description" placeholder="Full product description" required></textarea>
+
+          <div class="form-grid">
+            <div>
+              <label for="mrp">MRP</label>
+              <input id="mrp" name="mrp" type="number" min="0" placeholder="Listed MRP" required />
+            </div>
+            <div>
+              <label for="image">Product Image</label>
+              <input id="image" name="image" type="file" accept="image/*" />
+            </div>
+          </div>
+
+          <img id="preview" class="preview-img" src="https://placehold.co/240x240?text=Image" alt="Image preview" />
+          <br />
+          <button type="submit">Save Product</button>
+          <button type="button" class="btn-light" onclick="resetForm()">Reset</button>
+          <p id="productMessage" class="message"></p>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Product List</h3>
+        <div class="search-row">
+          <input id="productSearch" placeholder="Search MUN, AGN, code, name..." />
+          <button onclick="loadProducts()">Search</button>
+        </div>
+        <div id="productList"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script>
+    let selectedImageFile = null;
+
+    if (requireAuth(['admin'])) {
+      renderNavbar('Manage product catalogue');
+      loadProducts();
+    }
+
+    document.getElementById('image').addEventListener('change', (event) => {
+      selectedImageFile = event.target.files[0] || null;
+      if (selectedImageFile) {
+        document.getElementById('preview').src = URL.createObjectURL(selectedImageFile);
+      }
+    });
+
+    document.getElementById('productSearch').addEventListener('keyup', (event) => {
+      if (event.key === 'Enter') loadProducts();
+    });
+
+    document.getElementById('productForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const code = document.getElementById('code').value.trim().toUpperCase();
+      const groupCode = document.getElementById('groupCode').value.trim().toUpperCase() || code.split('-')[0];
+      const name = document.getElementById('name').value.trim();
+      const description = document.getElementById('description').value.trim();
+      const mrp = document.getElementById('mrp').value;
+
+      if (!code || !name || !description || !mrp) {
+        showMessage('productMessage', 'Please fill all required product details.', 'error');
+        return;
+      }
+
+      try {
+        const formData = new FormData();
+        formData.append('code', code);
+        formData.append('groupCode', groupCode);
+        formData.append('name', name);
+        formData.append('description', description);
+        formData.append('mrp', mrp);
+        formData.append('price', mrp);
+        if (selectedImageFile) formData.append('image', selectedImageFile);
+
+        const data = await apiRequest(`${API}/products`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${getToken()}` },
+          body: formData
+        });
+
+        showMessage('productMessage', data.message || 'Product saved successfully.');
+        resetForm();
+        loadProducts();
+      } catch (error) {
+        showMessage('productMessage', error.message, 'error');
+      }
+    });
+
+    function resetForm() {
+      document.getElementById('productForm').reset();
+      document.getElementById('preview').src = 'https://placehold.co/240x240?text=Image';
+      selectedImageFile = null;
+    }
+
+    async function loadProducts() {
+  try {
+    const query = document.getElementById("productSearch").value.trim();
+
+    const data = await apiRequest(
+      `${API}/products${query ? `?q=${encodeURIComponent(query)}` : ""}`,
+      {
+        headers: authHeaders()
+      }
+    );
+
+    const box = document.getElementById("productList");
+
+    if (!box) {
+      console.error("productList element not found");
+      return;
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+      box.innerHTML = `<div class="quote-card muted">No products found.</div>`;
+      return;
+    }
+
+    box.innerHTML = data.map(p => `
+      <div class="product-card compact">
+        <img 
+          src="${p.image || FALLBACK_IMAGE}" 
+          onerror="this.src='${FALLBACK_IMAGE}'"
+          class="product-img"
+        />
+
+        <div class="product-info">
+          <div class="code">${p.code || ""}</div>
+          <strong class="name">${p.name || ""}</strong>
+
+          <div class="price">₹${Number(p.mrp || p.price || 0).toFixed(2)}</div>
+
+          <div class="actions">
+            <button class="btn-small btn-red" onclick="deleteProduct('${p._id}')">Delete</button>
+          </div>
+        </div>
+      </div>
+    `).join("");
+
+  } catch (err) {
+    console.error("Error loading products:", err);
+    showMessage("productMessage", err.message, "error");
+  }
+}
+
+    async function deleteProduct(id) {
+      if (!confirm('Delete this product?')) return;
+
+      try {
+        const data = await apiRequest(`${API}/products/${id}`, {
+          method: 'DELETE',
+          headers: authHeaders()
+        });
+        showMessage('productMessage', data.message || 'Product deleted successfully.');
+        loadProducts();
+      } catch (error) {
+        showMessage('productMessage', error.message, 'error');
+      }
+    }
+
+  </script>
+</body>
+</html>

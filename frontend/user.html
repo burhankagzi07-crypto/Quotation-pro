@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>User Dashboard | Plumber</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <h2>User Dashboard</h2>
+        <p>Create quotations quickly using product code search and automated calculations.</p>
+      </div>
+      <a href="quotation.html"><button class="btn-green">Create Quotation</button></a>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><span>Total Products</span><strong id="productCount">0</strong></div>
+      <div class="stat"><span>My Quotations</span><strong id="quotationCount">0</strong></div>
+      <div class="stat"><span>Total Value</span><strong id="totalValue">₹0</strong></div>
+      <div class="stat"><span>Role</span><strong id="userRole">User</strong></div>
+    </section>
+
+    <section class="grid grid-dashboard-user">
+      <div class="card">
+        <h3>Build Quotation</h3>
+        <p class="muted">Search by codes like MUN, AGN, MUN-001 and select products for quotation.</p>
+        <br />
+        <a href="quotation.html"><button class="btn-green">Build Quotation</button></a>
+      </div>
+      <div class="card">
+        <h3>My Quotations</h3>
+        <p class="muted">Review saved quotations with product summary and totals.</p>
+        <br />
+        <a href="quotations.html"><button class="btn-dark">View Quotations</button></a>
+      </div>
+    </section>
+    <p id="dashboardMessage" class="message"></p>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script>
+    if (requireAuth(['user'])) {
+      renderNavbar('Quotation builder');
+      loadSummary();
+    }
+  </script>
+</body>
+</html>
